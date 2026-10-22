@@ -1,0 +1,32 @@
+groups:
+  - name: service-health
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down (scrape target {{ $labels.instance }} unreachable)"
+          runbook: "runbooks/service-down.md"
+
+      - alert: HighErrorRate
+        expr: |
+          sum by (job) (rate(http_requests_total{status=~"5.."}[5m]))
+            / sum by (job) (rate(http_requests_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} 5xx error ratio above 5% ({{ $value | humanizePercentage }})"
+          runbook: "runbooks/high-error-rate.md"
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} p95 latency above 500ms ({{ $value | humanizeDuration }})"
+          runbook: "runbooks/high-latency.md"

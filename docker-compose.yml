@@ -1,0 +1,80 @@
+services:
+  # Demo services: the same instrumented Flask app, scraped under two job names.
+  catalog:
+    build: ./demo_service
+    environment:
+      SERVICE_NAME: catalog
+    ports:
+      - "8081:8000"
+
+  payments:
+    build: ./demo_service
+    environment:
+      SERVICE_NAME: payments
+    ports:
+      - "8082:8000"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - catalog
+      - payments
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  # Slack bot (Socket Mode). Requires tokens in .env.
+  observabot-bot:
+    build: .
+    command: python -m observabot.slack_app
+    env_file: .env
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      ALERTMANAGER_URL: http://alertmanager:9093
+      RUNBOOK_DIR: /app/runbooks
+    depends_on:
+      - prometheus
+      - alertmanager
+
+  # MCP server over streamable HTTP, for MCP clients that connect to a URL.
+  observabot-mcp:
+    build: .
+    command: python -m observabot.mcp_server --http
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      ALERTMANAGER_URL: http://alertmanager:9093
+      RUNBOOK_DIR: /app/runbooks
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8001"
+    ports:
+      - "8001:8001"
+    depends_on:
+      - prometheus
+      - alertmanager
