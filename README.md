@@ -31,7 +31,8 @@ MCP, so any MCP-compatible client can query platform health.
 | `demo_service/` | Flask service instrumented with RED metrics and a runtime chaos switch. |
 | `prometheus/`, `alertmanager/`, `grafana/` | Scrape config, alert rules, receivers, and a provisioned dashboard. |
 | `docker-compose.yml` | Runs everything with one command. |
-| `tests/` | 28 unit tests (no running services needed). |
+| `pipeline/`, `airflow/` | Daily snapshot collector, Spark trends job, and the Airflow DAG. |
+| `tests/` | Unit tests, including a real local Spark run (no running services needed). |
 
 ### Tools
 
@@ -44,6 +45,41 @@ MCP, so any MCP-compatible client can query platform health.
 | `lookup_runbook` | Finds the runbook for an alert name or symptom. |
 
 The service name is the Prometheus `job` label, so `catalog` and `payments` are the demo services.
+
+## Daily trends pipeline (Airflow + Spark)
+
+A small batch pipeline that shows how the health data fits into a data platform.
+
+```
+Prometheus ──► collect_snapshot (Airflow) ──► data/snapshots/dt=YYYY-MM-DD/health.jsonl
+                                                   │
+                                                   ▼
+                                  spark_trends (Spark) ──► data/trends/service_trends.csv
+```
+
+- `pipeline/snapshot.py` records one health row per service per day.
+- `pipeline/spark_trends.py` reads every snapshot and writes one row per service per day: average request rate, average and peak 5xx error rate, peak p95 latency, and percentage of snapshots where the service was down.
+- `airflow/dags/service_health_daily.py` runs both steps daily.
+
+Run the pipeline by hand (needs Java 17 for Spark):
+
+```bash
+export JAVA_HOME=$(brew --prefix openjdk@17)
+.venv/bin/python -m pipeline.snapshot --date $(date -u +%F)
+.venv/bin/python -m pipeline.spark_trends
+```
+
+To run it under Airflow, use a separate virtualenv so its dependencies don't clash with the app's:
+
+```bash
+python3.12 -m venv .venv-airflow
+.venv-airflow/bin/pip install "apache-airflow==3.3.2" --constraint \
+  "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt"
+export AIRFLOW_HOME=$PWD/.airflow PROJECT_DIR=$PWD
+.venv-airflow/bin/airflow standalone
+```
+
+Then open the Airflow UI, unpause `service_health_daily`, and trigger a run.
 
 ## Quick start (demo stack)
 

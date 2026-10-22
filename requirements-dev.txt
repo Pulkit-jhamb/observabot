@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest>=9.1.0
+pyspark>=4.2.0
+pandas<3
